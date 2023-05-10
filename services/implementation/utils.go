@@ -1,6 +1,7 @@
 package implementation
 
 import (
+	"math"
 	"time"
 )
 
@@ -38,4 +39,25 @@ func getEquivalentDateLastMonth(d time.Time) time.Time {
 	}
 
 	return lastMonthDate
+}
+
+func roundTo2DecimalPlaces(f float64) float64 {
+	resp := math.Round(f*100) / 100
+	return resp
+}
+
+func getPercentageChange(old, new float64) float64 {
+	if old == 0 {
+		return new * 100
+	}
+
+	resp := ((new - old) / old) * 100
+
+	if math.IsNaN(resp) {
+		return 0
+	}
+
+	resp = roundTo2DecimalPlaces(resp)
+
+	return resp
 }

@@ -58,18 +58,7 @@ func (p *Provider) FeedAwsCost(ctx context.Context, params services.ParamFeedCos
 		if err != nil {
 			return fmt.Errorf("Failed to parse cost to float64: %w", err)
 		}
-
-		// get monthToDateCosts for the service
-		mtdCost, err := getMtdCostsByService(currMonthCosts, targetedDate, service.Keys)
-		if err != nil {
-			return fmt.Errorf("Failed to get service mtd costs: %w", err)
-		}
-
-		// mtdCost converted to float64
-		mtdCostFloat, err := strconv.ParseFloat(*mtdCost.Metrics["UnblendedCost"].Amount, 64)
-		if err != nil {
-			return fmt.Errorf("Failed to parse mtd cost to float64: %w", err)
-		}
+		cost = roundTo2DecimalPlaces(cost)
 
 		// get lastMonthSameDateCost for the service {
 		sameDateLastMonth := getEquivalentDateLastMonth(targetedDate)
@@ -86,6 +75,23 @@ func (p *Provider) FeedAwsCost(ctx context.Context, params services.ParamFeedCos
 				return fmt.Errorf("Failed to parse same date last month cost to float64: %w", err)
 			}
 		}
+		sameDateLastMonthCostFloat = roundTo2DecimalPlaces(sameDateLastMonthCostFloat)
+
+		// get percentage change between sameDateLastMonthCostFloat and cost
+		costDiff := getPercentageChange(sameDateLastMonthCostFloat, cost)
+
+		// get monthToDateCosts for the service
+		mtdCost, err := getMtdCostsByService(currMonthCosts, targetedDate, service.Keys)
+		if err != nil {
+			return fmt.Errorf("Failed to get service mtd costs: %w", err)
+		}
+
+		// mtdCost converted to float64
+		mtdCostFloat, err := strconv.ParseFloat(*mtdCost.Metrics["UnblendedCost"].Amount, 64)
+		if err != nil {
+			return fmt.Errorf("Failed to parse mtd cost to float64: %w", err)
+		}
+		mtdCostFloat = roundTo2DecimalPlaces(mtdCostFloat)
 
 		// get lastMtdCost for the service
 		lastMtdCost, err := getMtdCostsByService(lastMonthCosts, sameDateLastMonth, service.Keys)
@@ -98,6 +104,10 @@ func (p *Provider) FeedAwsCost(ctx context.Context, params services.ParamFeedCos
 		if err != nil {
 			return fmt.Errorf("Failed to parse last mtd cost to float64: %w", err)
 		}
+		lastMtdCostFloat = roundTo2DecimalPlaces(lastMtdCostFloat)
+
+		// get percentage change between lastMtdCostFloat and mtdCostFloat
+		mtdCostDiff := getPercentageChange(lastMtdCostFloat, mtdCostFloat)
 
 		// get lastMonth averageCostPerDay for the service
 		lastMonthAvgCostPerDay, err := getServiceAvgCost(lastMonthCosts, service.Keys)
@@ -110,6 +120,7 @@ func (p *Provider) FeedAwsCost(ctx context.Context, params services.ParamFeedCos
 		if err != nil {
 			return fmt.Errorf("Failed to parse last month avg cost per day to float64: %w", err)
 		}
+		lastMonthAvgCostPerDayFloat = roundTo2DecimalPlaces(lastMonthAvgCostPerDayFloat)
 
 		// get this month currMonthAvgCostPerDay for the service
 		currMonthAvgCostPerDay, err := getServiceAvgCost(currMonthCosts, service.Keys)
@@ -122,28 +133,35 @@ func (p *Provider) FeedAwsCost(ctx context.Context, params services.ParamFeedCos
 		if err != nil {
 			return fmt.Errorf("Failed to parse curr month avg cost per day to float64: %w", err)
 		}
+		currMonthAvgCostPerDayFloat = roundTo2DecimalPlaces(currMonthAvgCostPerDayFloat)
+
+		// get percentage change between lastMonthAvgCostPerDayFloat and currMonthAvgCostPerDayFloat
+		avgCostDiff := getPercentageChange(lastMonthAvgCostPerDayFloat, currMonthAvgCostPerDayFloat)
 
 		payload := Payload{
 			Timestamp:        targetedDate,
 			LinkedAccount:    service.Keys[0],
 			ServiceName:      service.Keys[1],
-			Cost:             cost,
-			MtdCost:          mtdCostFloat,
-			AvgCost:          currMonthAvgCostPerDayFloat,
 			LastMonthDate:    sameDateLastMonth,
+			Cost:             cost,
 			LastMonthCost:    sameDateLastMonthCostFloat,
+			CostDiff:         costDiff,
+			MtdCost:          mtdCostFloat,
 			LastMonthMtdCost: lastMtdCostFloat,
+			MtdCostDiff:      mtdCostDiff,
+			AvgCost:          currMonthAvgCostPerDayFloat,
 			LastMonthAvgCost: lastMonthAvgCostPerDayFloat,
+			AvgCostDiff:      avgCostDiff,
 		}
 
-		if service.Keys[1] == "Amazon Relational Database Service" {
-			b, err := json.MarshalIndent(payload, "", "  ")
-			if err != nil {
-				log.Fatalf("Failed to marshal payload: %v", err)
-			}
+		// if service.Keys[1] == "Amazon Relational Database Service" {
+		// 	b, err := json.MarshalIndent(payload, "", "  ")
+		// 	if err != nil {
+		// 		log.Fatalf("Failed to marshal payload: %v", err)
+		// 	}
 
-			log.Println(string(b))
-		}
+		// 	log.Println(string(b))
+		// }
 
 		b, err := json.Marshal(payload)
 		if err != nil {
@@ -170,11 +188,14 @@ type Payload struct {
 	Timestamp        time.Time `json:"@timestamp"`
 	LinkedAccount    string    `json:"linked_account"`
 	ServiceName      string    `json:"service_name"`
-	Cost             float64   `json:"cost"`
-	MtdCost          float64   `json:"mtd_cost"`
-	AvgCost          float64   `json:"avg_cost"`
 	LastMonthDate    time.Time `json:"last_month_date"`
+	Cost             float64   `json:"cost"`
 	LastMonthCost    float64   `json:"last_month_cost"`
+	CostDiff         float64   `json:"cost_diff"`
+	MtdCost          float64   `json:"mtd_cost"`
 	LastMonthMtdCost float64   `json:"last_month_mtd_cost"`
+	MtdCostDiff      float64   `json:"mtd_cost_diff"`
+	AvgCost          float64   `json:"avg_cost"`
 	LastMonthAvgCost float64   `json:"last_month_avg_cost"`
+	AvgCostDiff      float64   `json:"avg_cost_diff"`
 }
